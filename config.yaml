@@ -39,6 +39,12 @@ carry:
   slip_mm: 3.0         # 相对位姿漂移超过这个值判定滑动
   slip_deg: 5.0
 
+transport:
+  enabled: true
+  speed_mm_s: 80.0       # 搬运速度，越小越稳
+  delay_s: 1.5           # 吸附稳定后再等这么久，确认手已松开
+  deliver_mm: [300, -120, 220]   # 机械臂末端目标点（基座系）；有 calib/deliver.yaml 时以文件为准
+
 state:
   settle_speed_mm_s: 15.0
   settle_time_s: 0.8

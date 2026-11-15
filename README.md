@@ -13,6 +13,7 @@
 - **臂**：SO-101 从臂（6× Feetech STS3215 12V），去掉夹爪，换成自定义末端
 - **末端**：Ø60 盘体 + 15W Qi 模块 + 4× N35 磁铁 + 3 点弹簧浮动 + 32×32 全局快门相机
 - **吸附**：手机靠磁铁吸在盘上免手持充电；盘体带挂绳耳，挂绳做防坠兜底，CARRY 模式持续检测相对位姿
+- **搬运**：吸附稳定后按平滑轨迹把手机送到指定位置（默认 80mm/s），全程监测滑动
 - **视觉**：手机背面贴 40mm ArUco（DICT_4X4_50 / id 0），中心对准手机线圈；`solvePnP` 出位姿，手眼标定转到基座系
 - **朝向**：竖放、横放都能充——盘是圆的，线圈和磁环旋转对称；横放时贴合距离自动从 3mm 放到 6mm
 - **控制**：60Hz 位置型视觉伺服，`FOLLOW → APPROACH → CHARGE → RELEASE` 状态机，Placo 逆解
@@ -75,6 +76,7 @@ python calib.py intrinsics --images calib_data/chess     # 棋盘格内参
 python calib.py capture                                 # 固定标记，摆 15–20 个姿态
 python calib.py handeye                                 # 解 T_ee_cam，看散布 < 3mm
 python calib.py dock                                    # 手动把盘贴到手机，示教贴合位姿
+python calib.py deliver                                 # 可选：示教送达位姿（吸附后搬到的位置）
 ```
 
 输出写到 `calib/`，该目录里的 yaml 已被 gitignore。
@@ -99,6 +101,10 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 | `carry.enabled` | true | 吸附免手持模式；false 回到手持充电 |
 | `carry.gap_mm` | 1.0 | 吸附时盘面到手机 |
 | `carry.slip_mm` / `slip_deg` | 3 / 5 | 相对位姿漂移超过就断电回退 |
+| `transport.enabled` | true | 吸附后自动搬运 |
+| `transport.speed_mm_s` | 80 | 搬运速度，平滑加速/减速 |
+| `transport.delay_s` | 1.5 | 吸附稳定后等待确认手已松开 |
+| `transport.deliver_mm` | [300,-120,220] | 末端送达点；有 `calib/deliver.yaml` 时以文件为准 |
 | `puck.approach_mm_s` | 30 | 贴合段速度 |
 | `control.hz` | 60 | 控制频率 |
 | `control.vmax_mm_s` | 250 | 末端限速 |
@@ -113,6 +119,7 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 | `FOLLOW` | 悬停 60mm 跟随 | 静止 0.8s → APPROACH；丢失 0.3s → RETRACT |
 | `APPROACH` | 以 30mm/s 降到 3mm | 到位且稳定 0.3s → CHARGE；手机动了 → FOLLOW |
 | `CARRY` | 手机吸在盘上，保持 1mm，Qi 常开 | 相对位姿滑动 >3mm/5° → RETRACT；手机被取下同样触发 |
+| `TRANSPORT` | 平滑曲线搬到送达位姿，Qi 常开 | 到位 → CARRY；滑动或丢标记 → RETRACT |
 | `CHARGE` | 非吸附模式：打开 Qi，监控功率 | 位移 > 5mm 或速度 > 25mm/s → RELEASE |
 | `RELEASE` | 退回 60mm | 到位 → FOLLOW |
 | `RETRACT` | 沿法向退 100mm | 到位 → IDLE |
@@ -140,6 +147,7 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 - 急停串在舵机电源上，不要只做软件停
 - 吸附靠磁铁 + 挂绳双保险：磁铁负责贴合，挂绳负责万一磁铁剥离时手机不落地
 - CARRY 模式持续比较"手机相对盘"的位姿，滑动超过 3mm / 5° 立刻关 Qi 并沿法向退回
+- 搬运默认 80mm/s，使用平滑加减速；送达点会被限制在工作空间内
 - 工作空间限制在底座前方 150–350mm、高度 0–300mm
 - 手进入工作区时不要下降：可用 ToF 或简单的视觉遮挡检测
 - Qi 模块必须有 FOD，金属钥匙落在盘上会拒充
@@ -152,6 +160,7 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 - 标记旋转 90°：目标中心不变，手机长轴方向正确旋转
 - 竖放/横放：mock 状态机分别在 3mm / 6mm 进入 CHARGE，Qi 正常使能
 - CARRY：吸附后 1mm 保持、Qi 开启；模拟手机相对盘滑移 5mm 后 0.0s 内断电并回退 100mm
+- TRANSPORT：mock 完整走出 ATTACH → TRANSPORT → CARRY，搬运途中注入 5mm 滑移会立即中断并回退
 - 手眼 Park 解法：无噪声 0.0mm，0.5mm 噪声下 0.14mm
 - 状态机全流程与丢目标回退（mock）
 

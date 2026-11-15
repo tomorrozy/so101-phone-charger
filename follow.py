@@ -21,6 +21,7 @@ class State(Enum):
     APPROACH = "APPROACH"
     CHARGE = "CHARGE"
     CARRY = "CARRY"
+    TRANSPORT = "TRANSPORT"
     RELEASE = "RELEASE"
     RETRACT = "RETRACT"
 
@@ -59,7 +60,7 @@ def rot_between(a, b):
 
 
 class Follower:
-    def __init__(self, cfg, arm, dock, charger=None):
+    def __init__(self, cfg, arm, dock, charger=None, deliver_T=None):
         self.cfg = cfg
         self.arm = arm
         self.charger = charger or Charger()
@@ -91,6 +92,18 @@ class Follower:
         self.slip_deg = float(carry.get("slip_deg", 5.0))
         self.carry_target = None
         self.carry_ref = None
+        self.carry_ready_t = None
+        tr = cfg.get("transport", {})
+        self.transport_on = bool(tr.get("enabled", False))
+        self.transport_speed = float(tr.get("speed_mm_s", 80.0))
+        self.transport_delay = float(tr.get("delay_s", 1.5))
+        self.deliver_T = deliver_T
+        self.deliver_xyz = np.array(tr.get("deliver_mm", [300.0, -120.0, 220.0]), dtype=float)
+        self.transported = False
+        self.transport_start = None
+        self.transport_end = None
+        self.transport_t0 = 0.0
+        self.transport_T = 1.0
 
         self.state = State.IDLE
         self.t_state = time.monotonic()
@@ -124,6 +137,40 @@ class Follower:
         rotated = c >= self.rot_cos
         self.mode = "landscape" if rotated else "portrait"
         return self.contact_rot if rotated else self.contact
+
+    def _rel(self, target, ee_pose):
+        T = make_T(target.T_base_marker[:3, :3], target.pos_mm)
+        return inv_T(ee_pose) @ T
+
+    def _slip_exceeded(self, rel):
+        if self.carry_ref is None:
+            return False
+        dp = float(np.linalg.norm(rel[:3, 3] - self.carry_ref[:3, 3]))
+        Rerr = rel[:3, :3] @ self.carry_ref[:3, :3].T
+        ang = float(np.degrees(np.arccos(np.clip((np.trace(Rerr) - 1) / 2, -1, 1))))
+        self.last_slip = (dp, ang)
+        return dp > self.slip_mm or ang > self.slip_deg
+
+    def _abort(self, target, reason):
+        self.charger.disable()
+        self.release_reason = reason
+        self.force_retract = True
+        self.retract_target = self.setpoint.copy()
+        self.retract_target[:3, 3] += target.normal * self.retract_len
+        self._enter(State.RETRACT)
+
+    def _start_transport(self, now):
+        self.transport_start = self.setpoint.copy()
+        if self.deliver_T is not None:
+            self.transport_end = self.deliver_T.copy()
+        else:
+            self.transport_end = self.setpoint.copy()
+            self.transport_end[:3, 3] = self.deliver_xyz
+        self.transport_end[:3, 3] = self._clamp_box(self.transport_end[:3, 3])
+        dist = float(np.linalg.norm(self.transport_end[:3, 3] - self.setpoint[:3, 3]))
+        self.transport_t0 = now
+        self.transport_T = max(1.2, dist / max(self.transport_speed * 0.6, 1e-3))
+        self._enter(State.TRANSPORT)
 
     def _desired(self, target, gap):
         d = self.d0 + (gap - self.contact)
@@ -210,6 +257,8 @@ class Follower:
                     if self.carry_on:
                         self.carry_target = None
                         self.carry_ref = None
+                        self.carry_ready_t = None
+                        self.transported = False
                         self._enter(State.CARRY)
                     else:
                         self._enter(State.CHARGE)
@@ -230,21 +279,35 @@ class Follower:
             self.setpoint = self._towards(self.setpoint, self.carry_target, dt)
             self.arm.move_to(self.setpoint)
             if now - self.t_state >= self.carry_settle and target.T_base_marker is not None:
-                rel = inv_T(self.setpoint) @ target.T_base_marker
+                rel = self._rel(target, self.setpoint)
                 if self.carry_ref is None:
                     self.carry_ref = rel
-                else:
-                    dp = float(np.linalg.norm(rel[:3, 3] - self.carry_ref[:3, 3]))
-                    Rerr = rel[:3, :3] @ self.carry_ref[:3, :3].T
-                    ang = float(np.degrees(np.arccos(np.clip((np.trace(Rerr) - 1) / 2, -1, 1))))
-                    if dp > self.slip_mm or ang > self.slip_deg:
-                        self.charger.disable()
-                        self.release_reason = f"slip {dp:.1f}mm/{ang:.1f}deg"
-                        self.force_retract = True
-                        self.retract_target = self.setpoint.copy()
-                        self.retract_target[:3, 3] += target.normal * self.retract_len
-                        self._enter(State.RETRACT)
-                        return self.setpoint
+                    self.carry_ready_t = now
+                elif self._slip_exceeded(rel):
+                    dp, ang = self.last_slip
+                    self._abort(target, f"slip {dp:.1f}mm/{ang:.1f}deg")
+                    return self.setpoint
+                elif (self.transport_on and not self.transported
+                      and now - self.carry_ready_t >= self.transport_delay):
+                    self._start_transport(now)
+            return self.setpoint
+
+        elif self.state is State.TRANSPORT:
+            if target.T_base_marker is not None and self.carry_ref is not None:
+                if self._slip_exceeded(self._rel(target, self.setpoint)):
+                    dp, ang = self.last_slip
+                    self._abort(target, f"slip {dp:.1f}mm/{ang:.1f}deg")
+                    return self.setpoint
+            u = min(1.0, max(0.0, (now - self.transport_t0) / max(self.transport_T, 1e-3)))
+            s = u * u * (3.0 - 2.0 * u)
+            pos = self.transport_start[:3, 3] + (self.transport_end[:3, 3] - self.transport_start[:3, 3]) * s
+            self.setpoint = make_T(self.transport_start[:3, :3], pos)
+            self.setpoint[:3, 3] = self._clamp_box(self.setpoint[:3, 3])
+            self.arm.move_to(self.setpoint)
+            if u >= 1.0:
+                self.transported = True
+                self.carry_target = self.setpoint.copy()
+                self._enter(State.CARRY)
             return self.setpoint
 
         elif self.state is State.RELEASE:
@@ -268,9 +331,20 @@ class ScriptedTracker:
         self.normal = np.array(normal, dtype=float)
         self.top = np.array(top, dtype=float)
         self.t0 = time.monotonic()
+        self.attached = False
+        self.rel = None
 
     def update(self, frame, T_base_ee):
         t = time.monotonic() - self.t0
+        if t > 4.0 and not self.attached and T_base_ee is not None:
+            T_phone = make_T(np.column_stack([np.cross(self.top, self.normal), self.top, self.normal]),
+                             self.center)
+            self.rel = inv_T(T_base_ee) @ T_phone
+            self.attached = True
+        if self.attached:
+            T = T_base_ee @ self.rel
+            return Target(True, T[:3, 3].copy(), T[:3, 2].copy(), 0.0,
+                          time.monotonic(), T[:3, 1].copy(), T), None
         if t < 2.0:
             pos = self.center + np.array([0.0, 120.0 * np.sin(t * 2.0), 20.0 * np.sin(t * 3.0)])
             speed = float(np.hypot(240.0 * np.cos(t * 2.0), 60.0 * np.cos(t * 3.0)))
@@ -297,7 +371,11 @@ def run(cfg, config_dir=".", mock=False, duration=None):
         "normal0": np.array(raw["normal0"], dtype=float),
         "d0_mm": raw["d0_mm"],
     }
-    follower = Follower(cfg, arm, dock)
+    deliver_T = None
+    deliver_path = base / "calib" / "deliver.yaml"
+    if deliver_path.exists():
+        deliver_T = np.array(load_yaml(deliver_path)["T_base_ee"], dtype=float).reshape(4, 4)
+    follower = Follower(cfg, arm, dock, deliver_T=deliver_T)
 
     if mock:
         tracker = ScriptedTracker(center=(260.0, 0.0, 260.0))

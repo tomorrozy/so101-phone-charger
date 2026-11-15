@@ -167,6 +167,25 @@ def cmd_handeye(args):
     print(f"标记在基座系的位置散布: {spread.round(2)} mm（应 < 3mm）")
 
 
+def cmd_deliver(args):
+    cfg = load_cfg(args.config)
+    base_dir = Path(args.config).parent
+    arm = make_arm(cfg["arm"])
+    print("把手机吸在盘上，把臂摆到想送达的位置，回车保存，q 取消。")
+    try:
+        ch = input()
+        if ch.strip().lower() == "q":
+            raise SystemExit("取消")
+        T = arm.fk(arm.read())
+        out = base_dir / "calib" / "deliver.yaml"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            yaml.safe_dump({"T_base_ee": T.ravel().tolist()}, f)
+        print(f"送达位姿写入 {out}")
+    finally:
+        arm.release()
+
+
 def cmd_dock(args):
     cfg = load_cfg(args.config)
     cfg["_config_dir"] = str(Path(args.config).parent)
@@ -233,6 +252,9 @@ def main():
 
     p = sub.add_parser("dock")
     p.set_defaults(func=cmd_dock)
+
+    p = sub.add_parser("deliver")
+    p.set_defaults(func=cmd_deliver)
 
     args = ap.parse_args()
     args.func(args)
