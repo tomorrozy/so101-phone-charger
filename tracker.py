@@ -16,6 +16,7 @@ class Target:
     speed_mm_s: float
     stamp: float
     top_dir: np.ndarray | None = None   # 标记上边方向（手机长轴），用于判断横竖
+    T_base_marker: np.ndarray | None = None   # 完整位姿，CARRY 模式做滑动检测
 
 
 def load_yaml(path):
@@ -130,7 +131,7 @@ class MarkerTracker:
         if T_cam_marker is None:
             if self.stamp and now - self.stamp > 0.5:
                 self.filt = AlphaBeta()
-            return Target(False, np.zeros(3), np.zeros(3), 0.0, now, None), corners
+            return Target(False, np.zeros(3), np.zeros(3), 0.0, now, None, None), corners
 
         T_base_marker = T_base_ee @ self.T_ee_cam @ T_cam_marker
         pos = T_base_marker[:3, 3]
@@ -148,6 +149,6 @@ class MarkerTracker:
         self.normal /= np.linalg.norm(self.normal)
 
         return (
-            Target(True, pos_f, self.normal.copy(), float(np.linalg.norm(vel)), now, top),
+            Target(True, pos_f, self.normal.copy(), float(np.linalg.norm(vel)), now, top, T_base_marker),
             corners,
         )

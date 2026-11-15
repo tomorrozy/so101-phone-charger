@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 
 from arm import make_arm
-from tracker import MarkerTracker, Target, load_yaml, make_T
+from tracker import MarkerTracker, Target, inv_T, load_yaml, make_T
 
 
 class State(Enum):
@@ -20,6 +20,7 @@ class State(Enum):
     FOLLOW = "FOLLOW"
     APPROACH = "APPROACH"
     CHARGE = "CHARGE"
+    CARRY = "CARRY"
     RELEASE = "RELEASE"
     RETRACT = "RETRACT"
 
@@ -82,11 +83,21 @@ class Follower:
         self.charge_confirm = s["charge_confirm_s"]
         self.release_speed = s["release_speed_mm_s"]
         self.lost_timeout = s["lost_timeout_s"]
+        carry = cfg.get("carry", {})
+        self.carry_on = bool(carry.get("enabled", False))
+        self.carry_gap = float(carry.get("gap_mm", 1.0))
+        self.carry_settle = float(carry.get("settle_s", 0.8))
+        self.slip_mm = float(carry.get("slip_mm", 3.0))
+        self.slip_deg = float(carry.get("slip_deg", 5.0))
+        self.carry_target = None
+        self.carry_ref = None
 
         self.state = State.IDLE
         self.t_state = time.monotonic()
         self.gap = self.hover
         self.mode = "portrait"
+        self.release_reason = ""
+        self.force_retract = False
         self.still_t = 0.0
         self.lost_t = 0.0
         self.lost_handled = False
@@ -163,6 +174,14 @@ class Follower:
         self.lost_handled = False
         self.last_n = target.normal.copy()
 
+        if self.state is State.RETRACT and self.force_retract:
+            self.setpoint = self._towards(self.setpoint, self.retract_target, dt)
+            if np.linalg.norm(self.setpoint[:3, 3] - self.retract_target[:3, 3]) < 1.0:
+                self.force_retract = False
+                self._enter(State.IDLE)
+            self.arm.move_to(self.setpoint)
+            return self.setpoint
+
         if self.state in (State.IDLE, State.RETRACT):
             self.gap = self.hover
             self.still_t = 0.0
@@ -188,7 +207,12 @@ class Follower:
                 elif now - self.at_contact_since >= self.charge_confirm:
                     self.charge_origin = target.pos_mm.copy()
                     self.charger.enable()
-                    self._enter(State.CHARGE)
+                    if self.carry_on:
+                        self.carry_target = None
+                        self.carry_ref = None
+                        self._enter(State.CARRY)
+                    else:
+                        self._enter(State.CHARGE)
             else:
                 self.at_contact_since = None
 
@@ -198,6 +222,30 @@ class Follower:
                     or np.linalg.norm(target.pos_mm - self.charge_origin) > 5.0):
                 self.charger.disable()
                 self._enter(State.RELEASE)
+
+        elif self.state is State.CARRY:
+            self.gap = self.carry_gap
+            if self.carry_target is None:
+                self.carry_target = self._desired(target, self.carry_gap)
+            self.setpoint = self._towards(self.setpoint, self.carry_target, dt)
+            self.arm.move_to(self.setpoint)
+            if now - self.t_state >= self.carry_settle and target.T_base_marker is not None:
+                rel = inv_T(self.setpoint) @ target.T_base_marker
+                if self.carry_ref is None:
+                    self.carry_ref = rel
+                else:
+                    dp = float(np.linalg.norm(rel[:3, 3] - self.carry_ref[:3, 3]))
+                    Rerr = rel[:3, :3] @ self.carry_ref[:3, :3].T
+                    ang = float(np.degrees(np.arccos(np.clip((np.trace(Rerr) - 1) / 2, -1, 1))))
+                    if dp > self.slip_mm or ang > self.slip_deg:
+                        self.charger.disable()
+                        self.release_reason = f"slip {dp:.1f}mm/{ang:.1f}deg"
+                        self.force_retract = True
+                        self.retract_target = self.setpoint.copy()
+                        self.retract_target[:3, 3] += target.normal * self.retract_len
+                        self._enter(State.RETRACT)
+                        return self.setpoint
+            return self.setpoint
 
         elif self.state is State.RELEASE:
             self.charger.disable()
@@ -235,7 +283,9 @@ class ScriptedTracker:
         else:
             pos = self.center + np.array([0.0, 40.0, 0.0])
             speed = 0.0
-        return Target(True, pos, self.normal.copy(), speed, time.monotonic(), self.top), None
+        x = np.cross(self.top, self.normal)
+        T = make_T(np.column_stack([x, self.top, self.normal]), pos)
+        return Target(True, pos, self.normal.copy(), speed, time.monotonic(), self.top, T), None
 
 
 def run(cfg, config_dir=".", mock=False, duration=None):

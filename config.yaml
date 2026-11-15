@@ -32,6 +32,13 @@ control:
   ik_iters: 8
   latency_s: 0.08       # 用于目标预测
 
+carry:
+  enabled: true        # 手机磁吸在盘上，免手持充电
+  gap_mm: 1.0          # 吸附时盘面到手机的距离
+  settle_s: 0.8        # 吸附后等手机稳定再记录参考位姿
+  slip_mm: 3.0         # 相对位姿漂移超过这个值判定滑动
+  slip_deg: 5.0
+
 state:
   settle_speed_mm_s: 15.0
   settle_time_s: 0.8

@@ -34,7 +34,7 @@ puck_h             = 12;
 face_wall          = 3;
 coil_pocket_d      = 42.4;
 coil_pocket_depth  = 9;    // 前面留 3mm 壁
-magnet_d           = 5.0;  // N35 Ø5×3
+magnet_d           = 5.0;  // N35 Ø5×3，4 颗分布成环
 magnet_pocket_d    = 5.3;
 magnet_h           = 3.0;
 magnet_r           = 25.5;
@@ -113,12 +113,16 @@ module plate() {
 module puck() {
     translate([0, 0, puck_z0])
         difference() {
-            cylinder(d = puck_od, h = puck_h);
+            union() {
+                cylinder(d = puck_od, h = puck_h);
+                // 防坠挂绳耳
+                translate([0, -puck_od / 2 - 0.5, 2]) cube([10, 6, 4], center = true);
+            }
 
             // 线圈仓（从背面开）
             translate([0, 0, -0.1]) cylinder(d = coil_pocket_d, h = coil_pocket_depth + 0.1);
 
-            // 磁铁：从背面开孔，磁铁压到贴前壁的位置
+            // 磁铁：从背面开孔，磁铁压到离盘面 3mm
             for (a = magnet_angles) rotate([0, 0, a]) translate([magnet_r, 0, 0])
                 translate([0, 0, -0.1])
                     cylinder(d = magnet_pocket_d, h = puck_h - face_wall - 0.1);
@@ -129,6 +133,9 @@ module puck() {
 
             // 出线槽
             translate([-3, -puck_od / 2 + 1, -0.1]) cube([6, puck_od / 2 - 16, 4.1]);
+
+            // 挂绳孔（穿过耳片）
+            translate([0, -puck_od / 2 - 0.5, -1]) cylinder(d = 3.4, h = puck_h + 2);
         }
 }
 
@@ -154,9 +161,4 @@ if (PART == "plate") {
     // 弹簧示意
     for (a = float_angles) rotate([0, 0, a]) translate([float_screw_r, 0, plate_t])
         cylinder(d = 4.8, h = float_gap, center = false);
-    // 磁铁示意
-    color([0.3, 0.3, 0.3])
-        for (a = magnet_angles) rotate([0, 0, a]) translate([magnet_r, 0, 0])
-            translate([0, 0, puck_z0 + puck_h - face_wall - magnet_h])
-                cylinder(d = magnet_d, h = magnet_h);
 }
