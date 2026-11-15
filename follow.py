@@ -73,6 +73,8 @@ class Follower:
         self.omax = np.deg2rad(90.0)
         self.hover = cfg["puck"]["hover_mm"]
         self.contact = cfg["puck"]["contact_mm"]
+        self.contact_rot = cfg["puck"].get("contact_mm_rotated", self.contact)
+        self.rot_cos = cfg["puck"].get("rotated_axis_cos", 0.87)
         self.approach_v = cfg["puck"]["approach_mm_s"]
         self.retract_len = cfg["puck"]["retract_mm"]
         self.settle_speed = s["settle_speed_mm_s"]
@@ -84,6 +86,7 @@ class Follower:
         self.state = State.IDLE
         self.t_state = time.monotonic()
         self.gap = self.hover
+        self.mode = "portrait"
         self.still_t = 0.0
         self.lost_t = 0.0
         self.lost_handled = False
@@ -102,6 +105,14 @@ class Follower:
             if state is State.FOLLOW:
                 self.still_t = 0.0
                 self.at_contact_since = None
+
+    def _contact_gap(self, target):
+        """手机长轴是否朝相机侧：横放时多留 3mm，避免手机长边贴到腕部相机。"""
+        R = rot_between(self.n0, target.normal) @ self.R0
+        c = 0.0 if target.top_dir is None else abs(float(np.dot(R[:, 0], target.top_dir)))
+        rotated = c >= self.rot_cos
+        self.mode = "landscape" if rotated else "portrait"
+        return self.contact_rot if rotated else self.contact
 
     def _desired(self, target, gap):
         d = self.d0 + (gap - self.contact)
@@ -165,12 +176,13 @@ class Follower:
                 self._enter(State.APPROACH)
 
         elif self.state is State.APPROACH:
-            self.gap = max(self.contact, self.gap - self.approach_v * dt)
+            gap_c = self._contact_gap(target)
+            self.gap = max(gap_c, self.gap - self.approach_v * dt)
             if target.speed_mm_s > self.release_speed:
                 self.still_t = 0.0
                 self.at_contact_since = None
                 self._enter(State.FOLLOW)
-            elif self.gap <= self.contact + 1e-3:
+            elif self.gap <= gap_c + 1e-3:
                 if self.at_contact_since is None:
                     self.at_contact_since = now
                 elif now - self.at_contact_since >= self.charge_confirm:
@@ -181,7 +193,7 @@ class Follower:
                 self.at_contact_since = None
 
         elif self.state is State.CHARGE:
-            self.gap = self.contact
+            self.gap = self._contact_gap(target)
             if (target.speed_mm_s > self.release_speed
                     or np.linalg.norm(target.pos_mm - self.charge_origin) > 5.0):
                 self.charger.disable()
@@ -203,9 +215,10 @@ class Follower:
 class ScriptedTracker:
     """mock 模式：模拟手举手机移动，不依赖相机。"""
 
-    def __init__(self, center, normal=(0, 0, 1)):
+    def __init__(self, center, normal=(0, 0, 1), top=(0, 1, 0)):
         self.center = np.array(center, dtype=float)
         self.normal = np.array(normal, dtype=float)
+        self.top = np.array(top, dtype=float)
         self.t0 = time.monotonic()
 
     def update(self, frame, T_base_ee):
@@ -222,7 +235,7 @@ class ScriptedTracker:
         else:
             pos = self.center + np.array([0.0, 40.0, 0.0])
             speed = 0.0
-        return Target(True, pos, self.normal.copy(), speed, time.monotonic()), None
+        return Target(True, pos, self.normal.copy(), speed, time.monotonic(), self.top), None
 
 
 def run(cfg, config_dir=".", mock=False, duration=None):
@@ -267,8 +280,8 @@ def run(cfg, config_dir=".", mock=False, duration=None):
             if cap is not None:
                 if corners is not None:
                     cv2.aruco.drawDetectedMarkers(frame, corners)
-                cv2.putText(frame, follower.state.value, (20, 40),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+                cv2.putText(frame, f"{follower.state.value} {follower.mode} {follower.gap:.0f}mm",
+                            (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
                 cv2.imshow("follow", frame)
                 if cv2.waitKey(1) & 0xFF == 27:
                     break

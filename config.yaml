@@ -18,7 +18,9 @@ dock: calib/dock.yaml
 
 puck:
   hover_mm: 60.0        # 跟随悬停：相机只需看到 40mm 标记，60 已够且给延迟留余量
-  contact_mm: 3.0       # 贴合时盘面到手机背面
+  contact_mm: 3.0       # 贴合时盘面到手机背面（竖放）
+  contact_mm_rotated: 6.0  # 横放时多留 3mm，避免手机长边贴到腕部相机
+  rotated_axis_cos: 0.87   # 长轴与相机侧夹角 <30° 视为横放
   approach_mm_s: 30.0   # 贴合段速度
   retract_mm: 100.0     # 丢目标后的回退距离
 
