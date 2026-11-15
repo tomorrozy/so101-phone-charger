@@ -1,0 +1,50 @@
+# 机械臂 + Qi 盘跟随手持手机
+# 长度单位统一 mm，角度统一 deg
+
+camera:
+  index: 0
+  width: 1280
+  height: 720
+  fps: 60
+  intrinsics: calib/intrinsics.yaml
+
+marker:
+  dict: DICT_4X4_50
+  id: 0
+  size_mm: 40.0
+
+handeye: calib/handeye.yaml
+dock: calib/dock.yaml
+
+puck:
+  hover_mm: 60.0        # 跟随悬停：相机只需看到 40mm 标记，60 已够且给延迟留余量
+  contact_mm: 3.0       # 贴合时盘面到手机背面
+  approach_mm_s: 30.0   # 贴合段速度
+  retract_mm: 100.0     # 丢目标后的回退距离
+
+control:
+  hz: 60
+  vmax_mm_s: 250.0
+  max_joint_step_deg: 5.0
+  orientation_weight: 0.25
+  ik_iters: 8
+  latency_s: 0.08       # 用于目标预测
+
+state:
+  settle_speed_mm_s: 15.0
+  settle_time_s: 0.8
+  charge_confirm_s: 0.3
+  release_speed_mm_s: 25.0
+  lost_timeout_s: 0.3
+
+safety:
+  workspace_mm:
+    x: [-50, 420]
+    y: [-350, 350]
+    z: [20, 520]
+
+arm:
+  backend: so101
+  port: /dev/ttyACM0
+  urdf: urdf/so101_new_calib.urdf
+  joints: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll]

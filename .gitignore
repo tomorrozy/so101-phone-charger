@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+calib_data/
+calib/intrinsics.yaml
+calib/handeye.yaml
+calib/dock.yaml
+urdf/
+.DS_Store
+

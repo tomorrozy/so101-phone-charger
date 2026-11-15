@@ -1,0 +1,5 @@
+numpy
+opencv-python
+pyyaml
+# 机械臂后端（仅接 SO-101 时需要）
+# lerobot
