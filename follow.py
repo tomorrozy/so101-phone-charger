@@ -159,6 +159,19 @@ class Follower:
         self.retract_target[:3, 3] += target.normal * self.retract_len
         self._enter(State.RETRACT)
 
+    def set_carry(self, on):
+        self.carry_on = bool(on)
+        self.transported = False
+        if not self.carry_on and self.state is State.CARRY:
+            self.charger.disable()
+            self.carry_target = None
+            self.carry_ref = None
+            self._enter(State.RELEASE)
+
+    def request_transport(self):
+        if self.carry_on and self.state is State.CARRY and self.carry_ref is not None:
+            self._start_transport(time.monotonic())
+
     def _start_transport(self, now):
         self.transport_start = self.setpoint.copy()
         if self.deliver_T is not None:
@@ -326,17 +339,18 @@ class Follower:
 class ScriptedTracker:
     """mock 模式：模拟手举手机移动，不依赖相机。"""
 
-    def __init__(self, center, normal=(0, 0, 1), top=(0, 1, 0)):
+    def __init__(self, center, normal=(0, 0, 1), top=(0, 1, 0), attach=True):
         self.center = np.array(center, dtype=float)
         self.normal = np.array(normal, dtype=float)
         self.top = np.array(top, dtype=float)
         self.t0 = time.monotonic()
+        self.attach = attach
         self.attached = False
         self.rel = None
 
     def update(self, frame, T_base_ee):
         t = time.monotonic() - self.t0
-        if t > 4.0 and not self.attached and T_base_ee is not None:
+        if self.attach and t > 4.0 and not self.attached and T_base_ee is not None:
             T_phone = make_T(np.column_stack([np.cross(self.top, self.normal), self.top, self.normal]),
                              self.center)
             self.rel = inv_T(T_base_ee) @ T_phone
@@ -378,7 +392,8 @@ def run(cfg, config_dir=".", mock=False, duration=None):
     follower = Follower(cfg, arm, dock, deliver_T=deliver_T)
 
     if mock:
-        tracker = ScriptedTracker(center=(260.0, 0.0, 260.0))
+        tracker = ScriptedTracker(center=(260.0, 0.0, 260.0),
+                                  attach=bool(cfg.get("carry", {}).get("enabled", False)))
         cap = None
     else:
         cap = cv2.VideoCapture(cfg["camera"]["index"])
@@ -408,11 +423,20 @@ def run(cfg, config_dir=".", mock=False, duration=None):
             if cap is not None:
                 if corners is not None:
                     cv2.aruco.drawDetectedMarkers(frame, corners)
-                cv2.putText(frame, f"{follower.state.value} {follower.mode} {follower.gap:.0f}mm",
-                            (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+                tag = "CARRY" if follower.carry_on else "FOLLOW"
+                cv2.putText(frame, f"{tag} {follower.state.value} {follower.mode} {follower.gap:.0f}mm",
+                            (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 255, 0), 2)
+                cv2.putText(frame, "c: follow/carry   t: transport   esc: quit",
+                            (20, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 1)
                 cv2.imshow("follow", frame)
-                if cv2.waitKey(1) & 0xFF == 27:
+                key = cv2.waitKey(1) & 0xFF
+                if key == 27:
                     break
+                if key == ord("c"):
+                    follower.set_carry(not follower.carry_on)
+                    print("carry mode:", follower.carry_on)
+                if key == ord("t"):
+                    follower.request_transport()
 
             sleep = dt - (time.monotonic() - last)
             if sleep > 0:

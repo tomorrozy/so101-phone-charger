@@ -14,6 +14,7 @@
 - **末端**：Ø60 盘体 + 15W Qi 模块 + 4× N35 磁铁 + 3 点弹簧浮动 + 32×32 全局快门相机
 - **吸附**：手机靠磁铁吸在盘上免手持充电；盘体带挂绳耳，挂绳做防坠兜底，CARRY 模式持续检测相对位姿
 - **搬运**：吸附稳定后按平滑轨迹把手机送到指定位置（默认 80mm/s），全程监测滑动
+- **两种模式**：默认手持跟随（60mm 悬停）；运行中按 `c` 切到磁吸免手持，按 `t` 手动搬运
 - **视觉**：手机背面贴 40mm ArUco（DICT_4X4_50 / id 0），中心对准手机线圈；`solvePnP` 出位姿，手眼标定转到基座系
 - **朝向**：竖放、横放都能充——盘是圆的，线圈和磁环旋转对称；横放时贴合距离自动从 3mm 放到 6mm
 - **控制**：60Hz 位置型视觉伺服，`FOLLOW → APPROACH → CHARGE → RELEASE` 状态机，Placo 逆解
@@ -98,7 +99,7 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 | `puck.contact_mm` | 3 | 竖放时的贴合距离，靠泡棉和弹簧吸收 |
 | `puck.contact_mm_rotated` | 6 | 横放时的贴合距离，给手机长边和腕部相机留间隙 |
 | `puck.rotated_axis_cos` | 0.87 | 手机长轴与相机侧夹角 <30° 时判为横放 |
-| `carry.enabled` | true | 吸附免手持模式；false 回到手持充电 |
+| `carry.enabled` | false | 默认手持跟随；true 为吸附免手持，运行中可按 `c` 切换 |
 | `carry.gap_mm` | 1.0 | 吸附时盘面到手机 |
 | `carry.slip_mm` / `slip_deg` | 3 / 5 | 相对位姿漂移超过就断电回退 |
 | `transport.enabled` | true | 吸附后自动搬运 |
@@ -123,6 +124,15 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 | `CHARGE` | 非吸附模式：打开 Qi，监控功率 | 位移 > 5mm 或速度 > 25mm/s → RELEASE |
 | `RELEASE` | 退回 60mm | 到位 → FOLLOW |
 | `RETRACT` | 沿法向退 100mm | 到位 → IDLE |
+
+## 两种模式
+
+| 模式 | 行为 | 切换 |
+|---|---|---|
+| 跟随（默认） | 60mm 悬停跟着手机走；停下 0.8s 后贴近充电；手机一动就退回继续跟 | `carry.enabled: false`，窗口按 `c` |
+| 吸附 | 1mm 吸住手机、Qi 常开；稳定后自动或按 `t` 搬到送达点；滑动 3mm/5° 断电退回 | `carry.enabled: true`，窗口按 `c` |
+
+运行窗口快捷键：`c` 切换跟随/吸附，`t` 手动搬运，`esc` 退出。
 
 ## 竖放 / 横放
 
@@ -161,6 +171,7 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 - 竖放/横放：mock 状态机分别在 3mm / 6mm 进入 CHARGE，Qi 正常使能
 - CARRY：吸附后 1mm 保持、Qi 开启；模拟手机相对盘滑移 5mm 后 0.0s 内断电并回退 100mm
 - TRANSPORT：mock 完整走出 ATTACH → TRANSPORT → CARRY，搬运途中注入 5mm 滑移会立即中断并回退
+- 两种模式：mock 分别走出 FOLLOW→APPROACH→CHARGE→RELEASE→FOLLOW 和 CARRY→TRANSPORT→CARRY
 - 手眼 Park 解法：无噪声 0.0mm，0.5mm 噪声下 0.14mm
 - 状态机全流程与丢目标回退（mock）
 
