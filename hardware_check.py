@@ -90,8 +90,12 @@ def check_arm(cfg, base):
         from arm import make_arm
         arm = make_arm(cfg["arm"])
         q = arm.read()
+        lv = arm.load() if hasattr(arm, "load") else None
         arm.release()
-        return "PASS", "关节: " + ", ".join(f"{v:.1f}" for v in q)
+        msg = "关节: " + ", ".join(f"{v:.1f}" for v in q)
+        if lv is not None:
+            msg += f" | load={lv:.0f}"
+        return "PASS", msg
     except Exception as e:
         return "FAIL", f"连接/读取失败: {e}"
 

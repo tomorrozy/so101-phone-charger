@@ -45,6 +45,14 @@ transport:
   delay_s: 1.5           # 吸附稳定后再等这么久，确认手已松开
   deliver_mm: [300, -120, 220]   # 机械臂末端目标点（基座系）；有 calib/deliver.yaml 时以文件为准
 
+load:
+  enabled: true
+  baseline_s: 0.6      # 吸附稳定后取负载基线的时间
+  drop_delta: 40       # 低于基线这么多判定脱落（原始单位，需实测）
+  pull_delta: 60       # 高于基线这么多判定被拉
+  confirm_s: 0.3
+  max_abs: 850         # 搬运时绝对过载
+
 state:
   settle_speed_mm_s: 15.0
   settle_time_s: 0.8

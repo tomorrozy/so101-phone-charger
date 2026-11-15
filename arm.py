@@ -33,6 +33,16 @@ class SO101Arm:
     def fk(self, q=None):
         return self.kin.forward_kinematics(self.q if q is None else q)
 
+    def load(self):
+        """读舵机负载（原始单位，约 0-1000）。读不到返回 None。"""
+        for reg in ("Present_Load", "Present_Current"):
+            try:
+                vals = self.robot.bus.sync_read(reg, normalize=False)
+                return max(abs(float(v)) for v in vals.values())
+            except Exception:
+                continue
+        return None
+
     def move_to(self, pose):
         target = self.kin.inverse_kinematics(
             self.q,
@@ -61,8 +71,9 @@ class SO101Arm:
 class MockArm:
     """没有硬件时用来验证状态机和坐标逻辑：直接积分位姿，不做逆解。"""
 
-    def __init__(self, pose=None):
+    def __init__(self, pose=None, load_value=None):
         self.pose = np.eye(4) if pose is None else np.array(pose, dtype=float)
+        self.load_value = load_value
         self.calls = 0
 
     def read(self):
@@ -70,6 +81,9 @@ class MockArm:
 
     def fk(self, q=None):
         return self.pose.copy()
+
+    def load(self):
+        return self.load_value
 
     def move_to(self, pose):
         self.pose = np.array(pose, dtype=float)

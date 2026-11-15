@@ -106,6 +106,9 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 | `transport.speed_mm_s` | 80 | 搬运速度，平滑加速/减速 |
 | `transport.delay_s` | 1.5 | 吸附稳定后等待确认手已松开 |
 | `transport.deliver_mm` | [300,-120,220] | 末端送达点；有 `calib/deliver.yaml` 时以文件为准 |
+| `load.enabled` | true | 舵机负载监测 |
+| `load.drop_delta` / `pull_delta` | 40 / 60 | 相对基线的脱落/被拉阈值（原始单位，需实测） |
+| `load.max_abs` | 850 | 搬运时的绝对过载阈值 |
 | `puck.approach_mm_s` | 30 | 贴合段速度 |
 | `control.hz` | 60 | 控制频率 |
 | `control.vmax_mm_s` | 250 | 末端限速 |
@@ -119,7 +122,7 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 |---|---|---|
 | `FOLLOW` | 悬停 60mm 跟随 | 静止 0.8s → APPROACH；丢失 0.3s → RETRACT |
 | `APPROACH` | 以 30mm/s 降到 3mm | 到位且稳定 0.3s → CHARGE；手机动了 → FOLLOW |
-| `CARRY` | 手机吸在盘上，保持 1mm，Qi 常开 | 相对位姿滑动 >3mm/5° → RETRACT；手机被取下同样触发 |
+| `CARRY` | 手机吸在盘上，保持 1mm，Qi 常开 | 滑动 >3mm/5°（标记可见时）或负载跌落/突增 → RETRACT |
 | `TRANSPORT` | 平滑曲线搬到送达位姿，Qi 常开 | 到位 → CARRY；滑动或丢标记 → RETRACT |
 | `CHARGE` | 非吸附模式：打开 Qi，监控功率 | 位移 > 5mm 或速度 > 25mm/s → RELEASE |
 | `RELEASE` | 退回 60mm | 到位 → FOLLOW |
@@ -131,11 +134,20 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 |---|---|
 | 你拿着手机移动 | 60mm 悬停跟随；停稳 0.8s 后自动贴近并吸附 |
 | 已吸附 | 1mm 保持、Qi 常开；按 `t` 可搬到送达点 |
-| 拿走手机 | 按 `c` 释放：关 Qi、退回，随后恢复跟随 |
+| 拿走手机 | 负载检测到脱落/被拉会自动释放；也可以按 `c` |
 
 吸到 1mm 后腕部相机基本看不到标记，这是正常的：此阶段不再依赖视觉，丢标记不会中断充电，防坠靠挂绳。想只用跟随、不吸附，把 `carry.enabled` 设为 false。
 
 运行窗口快捷键：`c` 释放/切换吸附，`t` 手动搬运，`esc` 退出。
+
+## 舵机负载
+
+- 吸附稳定后 0.6s 取负载基线，之后以 20Hz 采样（不拖慢 60Hz 控制环）
+- 低于基线 `drop_delta` → 判定手机脱落；高于基线 `pull_delta` → 判定被拉；持续 0.3s 关 Qi 并回退
+- 搬运时绝对值超过 `max_abs` → 过载中止
+- 单位是 STS3215 的原始负载值（约 0–1000），**必须先实测标定**：装手机/不装手机各读一次，把两个 delta 设成差值的一半左右
+
+`python hardware_check.py` 会在机械臂项里打印当前负载，方便标定。
 
 ## 竖放 / 横放
 
@@ -160,7 +172,7 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 - 急停串在舵机电源上，不要只做软件停
 - 吸附靠磁铁 + 挂绳双保险：磁铁负责贴合，挂绳负责万一磁铁剥离时手机不落地
 - 标记可见时，CARRY 持续比较"手机相对盘"的位姿，滑动超过 3mm / 5° 立刻关 Qi 并沿法向退回
-- 吸到 1mm 后相机看不到标记，视觉监测自动跳过；这段时间的防坠完全依赖挂绳
+- 吸到 1mm 后相机看不到标记，视觉监测自动跳过，改由舵机负载检测接替；挂绳仍是物理兜底
 - 搬运默认 80mm/s，使用平滑加减速；送达点会被限制在工作空间内
 - 工作空间限制在底座前方 150–350mm、高度 0–300mm
 - 手进入工作区时不要下降：可用 ToF 或简单的视觉遮挡检测
@@ -177,6 +189,7 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 - TRANSPORT：mock 完整走出 ATTACH → TRANSPORT → CARRY，搬运途中注入 5mm 滑移会立即中断并回退
 - 两种模式：mock 分别走出 FOLLOW→APPROACH→CHARGE→RELEASE→FOLLOW 和 CARRY→TRANSPORT→CARRY
 - 吸附中标记消失 1.5s：保持 CARRY、Qi 不断，按 `c` 后正常释放
+- 负载监测：基线 300，跌到 100 触发 `load 100 ref 300`；升到 400 同样触发，均断电回退
 - 手眼 Park 解法：无噪声 0.0mm，0.5mm 噪声下 0.14mm
 - 状态机全流程与丢目标回退（mock）
 

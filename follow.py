@@ -111,6 +111,21 @@ class Follower:
         self.mode = "portrait"
         self.release_reason = ""
         self.last_target = None
+        ld = cfg.get("load", {})
+        self.load_on = bool(ld.get("enabled", True))
+        self.load_base_s = float(ld.get("baseline_s", 0.6))
+        self.load_drop = float(ld.get("drop_delta", 40.0))
+        self.load_pull = float(ld.get("pull_delta", 60.0))
+        self.load_confirm = float(ld.get("confirm_s", 0.3))
+        self.load_max = float(ld.get("max_abs", 850.0))
+        hz = float(cfg["control"]["hz"])
+        self.load_div = max(1, int(hz / 20.0))
+        self.load_n = max(3, int(self.load_base_s * hz / self.load_div))
+        self.load_ref = None
+        self.load_acc = []
+        self.load_bad_t = 0.0
+        self.load_i = 0
+        self.load_last = None
         self.force_retract = False
         self.still_t = 0.0
         self.lost_t = 0.0
@@ -151,6 +166,35 @@ class Follower:
         ang = float(np.degrees(np.arccos(np.clip((np.trace(Rerr) - 1) / 2, -1, 1))))
         self.last_slip = (dp, ang)
         return dp > self.slip_mm or ang > self.slip_deg
+
+    def _load(self):
+        fn = getattr(self.arm, "load", None)
+        if not callable(fn):
+            return None
+        try:
+            return fn()
+        except Exception:
+            return None
+
+    def _load_monitor(self, target, dt):
+        if not self.load_on:
+            return
+        self.load_i = (self.load_i + 1) % self.load_div
+        if self.load_i:
+            return
+        lv = self._load()
+        if lv is None:
+            return
+        self.load_last = lv
+        if self.load_ref is None:
+            self.load_acc.append(lv)
+            if len(self.load_acc) >= self.load_n:
+                self.load_ref = float(np.mean(self.load_acc))
+            return
+        bad = lv < self.load_ref - self.load_drop or lv > self.load_ref + self.load_pull
+        self.load_bad_t = self.load_bad_t + dt * self.load_div if bad else 0.0
+        if self.load_bad_t >= self.load_confirm:
+            self._abort(target, f"load {lv:.0f} ref {self.load_ref:.0f}")
 
     def _abort(self, target, reason):
         self.charger.disable()
@@ -279,6 +323,9 @@ class Follower:
                         self.carry_ref = None
                         self.carry_ready_t = None
                         self.transported = False
+                        self.load_ref = None
+                        self.load_acc = []
+                        self.load_bad_t = 0.0
                         self._enter(State.CARRY)
                     else:
                         self._enter(State.CHARGE)
@@ -310,6 +357,7 @@ class Follower:
                 elif (self.transport_on and not self.transported
                       and now - self.carry_ready_t >= self.transport_delay):
                     self._start_transport(now)
+            self._load_monitor(target, dt)
             return self.setpoint
 
         elif self.state is State.TRANSPORT:
@@ -318,6 +366,14 @@ class Follower:
                     dp, ang = self.last_slip
                     self._abort(target, f"slip {dp:.1f}mm/{ang:.1f}deg")
                     return self.setpoint
+            self.load_i = (self.load_i + 1) % self.load_div
+            if self.load_i == 0 and self.load_on:
+                lv = self._load()
+                if lv is not None:
+                    self.load_last = lv
+                    if lv > self.load_max:
+                        self._abort(target, f"overload {lv:.0f}")
+                        return self.setpoint
             u = min(1.0, max(0.0, (now - self.transport_t0) / max(self.transport_T, 1e-3)))
             s = u * u * (3.0 - 2.0 * u)
             pos = self.transport_start[:3, 3] + (self.transport_end[:3, 3] - self.transport_start[:3, 3]) * s
@@ -433,7 +489,7 @@ def run(cfg, config_dir=".", mock=False, duration=None):
                 tag = "CARRY" if follower.carry_on else "FOLLOW"
                 cv2.putText(frame, f"{tag} {follower.state.value} {follower.mode} {follower.gap:.0f}mm",
                             (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 255, 0), 2)
-                cv2.putText(frame, "c: follow/carry   t: transport   esc: quit",
+                cv2.putText(frame, f"c: follow/carry  t: transport  load={follower.load_last}",
                             (20, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 1)
                 cv2.imshow("follow", frame)
                 key = cv2.waitKey(1) & 0xFF
