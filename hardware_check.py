@@ -31,7 +31,7 @@ def check_ports(cfg_port):
     ports = list(list_ports.comports())
     names = [p.device for p in ports]
     if not ports:
-        return "FAIL", "没有串口设备（机械臂没插/驱动没装）"
+        return "SKIP", "没有串口设备（机械臂没插）"
     if cfg_port in names:
         return "PASS", f"找到配置端口 {cfg_port}"
     return "WARN", f"有串口 {names}，但配置里是 {cfg_port}"
@@ -86,6 +86,10 @@ def check_arm(cfg, base):
     urdf = base / cfg["arm"]["urdf"]
     if not urdf.exists():
         return "SKIP", f"缺 URDF: {urdf}"
+    if has("serial"):
+        from serial.tools import list_ports
+        if cfg["arm"]["port"] not in [p.device for p in list_ports.comports()]:
+            return "SKIP", f"串口 {cfg['arm']['port']} 不存在（机械臂没插）"
     try:
         from arm import make_arm
         arm = make_arm(cfg["arm"])
@@ -112,7 +116,7 @@ def main():
 
     rows = []
     for mod, hint in [("numpy", ""), ("cv2", ""), ("yaml", ""), ("serial", "pip install pyserial"),
-                      ("lerobot", 'pip install "lerobot[placo-dep]"'), ("placo", "随 lerobot 安装")]:
+                      ("lerobot", "pip install lerobot"), ("placo", "可选：Linux/macOS 才装")]:
         rows.append((f"依赖 {mod}", "PASS" if has(mod) else "SKIP", hint or "ok"))
 
     status, msg = check_ports(cfg["arm"]["port"])

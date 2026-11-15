@@ -48,18 +48,20 @@ desk-charger/
 ### 1. 依赖
 
 ```bash
-pip install -r requirements.txt
-pip install "lerobot[placo-dep]"        # 机械臂后端
+pip install -r requirements.txt   # 含 lerobot
 ```
 
-需要 Python ≥ 3.10。OpenCV 5 的 Python 绑定没有 `calibrateHandEye`，`calib.py` 内置了 Park 法实现，不依赖它。
+需要 Python ≥ 3.12（lerobot 0.7 的要求）。placo 只有 macOS/Linux 的 wheel；**Windows 上会自动使用仓库内置的 numpy URDF 逆解**（`kinematics_np.py`），实测位置误差 <0.1mm、单次约 9ms。Linux/macOS 想用 placo 再 `pip install "lerobot[placo-dep]"`。
+
+OpenCV 5 的 Python 绑定没有 `calibrateHandEye`，`calib.py` 内置了 Park 法实现，不依赖它。
 
 ### 2. 模型与打印
 
 从 [SO-ARM100](https://github.com/TheRobotStudio/SO-ARM100) 下载臂的 URDF 和打印件：
 
-```
-urdf/so101_new_calib.urdf   ← Simulation/SO101/so101_new_calib.urdf
+```bash
+mkdir -p urdf
+curl -L -o urdf/so101_new_calib.urdf   "https://ghfast.top/https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/main/Simulation/SO101/so101_new_calib.urdf"
 ```
 
 末端用本仓库的 STL，PETG、0.2mm、4 壁、25% 填充；M2.5 用热熔螺母。
@@ -191,6 +193,7 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 - 吸附中标记消失 1.5s：保持 CARRY、Qi 不断，按 `c` 后正常释放
 - 负载监测：基线 300，跌到 100 触发 `load 100 ref 300`；升到 400 同样触发，均断电回退
 - 手眼 Park 解法：无噪声 0.0mm，0.5mm 噪声下 0.14mm
+- 内置 numpy 逆解：往返位置误差 0.00mm，角度 0.15°，单次 8.6ms
 - 状态机全流程与丢目标回退（mock）
 
 未验证：
