@@ -99,7 +99,7 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 | `puck.contact_mm` | 3 | 竖放时的贴合距离，靠泡棉和弹簧吸收 |
 | `puck.contact_mm_rotated` | 6 | 横放时的贴合距离，给手机长边和腕部相机留间隙 |
 | `puck.rotated_axis_cos` | 0.87 | 手机长轴与相机侧夹角 <30° 时判为横放 |
-| `carry.enabled` | false | 默认手持跟随；true 为吸附免手持，运行中可按 `c` 切换 |
+| `carry.enabled` | true | 停稳后自动吸附；false 只跟随不吸附 |
 | `carry.gap_mm` | 1.0 | 吸附时盘面到手机 |
 | `carry.slip_mm` / `slip_deg` | 3 / 5 | 相对位姿漂移超过就断电回退 |
 | `transport.enabled` | true | 吸附后自动搬运 |
@@ -125,14 +125,17 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 | `RELEASE` | 退回 60mm | 到位 → FOLLOW |
 | `RETRACT` | 沿法向退 100mm | 到位 → IDLE |
 
-## 两种模式
+## 跟随 + 吸附（默认自动流转）
 
-| 模式 | 行为 | 切换 |
-|---|---|---|
-| 跟随（默认） | 60mm 悬停跟着手机走；停下 0.8s 后贴近充电；手机一动就退回继续跟 | `carry.enabled: false`，窗口按 `c` |
-| 吸附 | 1mm 吸住手机、Qi 常开；稳定后自动或按 `t` 搬到送达点；滑动 3mm/5° 断电退回 | `carry.enabled: true`，窗口按 `c` |
+| 场景 | 行为 |
+|---|---|
+| 你拿着手机移动 | 60mm 悬停跟随；停稳 0.8s 后自动贴近并吸附 |
+| 已吸附 | 1mm 保持、Qi 常开；按 `t` 可搬到送达点 |
+| 拿走手机 | 按 `c` 释放：关 Qi、退回，随后恢复跟随 |
 
-运行窗口快捷键：`c` 切换跟随/吸附，`t` 手动搬运，`esc` 退出。
+吸到 1mm 后腕部相机基本看不到标记，这是正常的：此阶段不再依赖视觉，丢标记不会中断充电，防坠靠挂绳。想只用跟随、不吸附，把 `carry.enabled` 设为 false。
+
+运行窗口快捷键：`c` 释放/切换吸附，`t` 手动搬运，`esc` 退出。
 
 ## 竖放 / 横放
 
@@ -156,7 +159,8 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 
 - 急停串在舵机电源上，不要只做软件停
 - 吸附靠磁铁 + 挂绳双保险：磁铁负责贴合，挂绳负责万一磁铁剥离时手机不落地
-- CARRY 模式持续比较"手机相对盘"的位姿，滑动超过 3mm / 5° 立刻关 Qi 并沿法向退回
+- 标记可见时，CARRY 持续比较"手机相对盘"的位姿，滑动超过 3mm / 5° 立刻关 Qi 并沿法向退回
+- 吸到 1mm 后相机看不到标记，视觉监测自动跳过；这段时间的防坠完全依赖挂绳
 - 搬运默认 80mm/s，使用平滑加减速；送达点会被限制在工作空间内
 - 工作空间限制在底座前方 150–350mm、高度 0–300mm
 - 手进入工作区时不要下降：可用 ToF 或简单的视觉遮挡检测
@@ -172,6 +176,7 @@ Windows 上把 `config.yaml` 的 `arm.port` 改成实际 COM 口（如 `COM5`）
 - CARRY：吸附后 1mm 保持、Qi 开启；模拟手机相对盘滑移 5mm 后 0.0s 内断电并回退 100mm
 - TRANSPORT：mock 完整走出 ATTACH → TRANSPORT → CARRY，搬运途中注入 5mm 滑移会立即中断并回退
 - 两种模式：mock 分别走出 FOLLOW→APPROACH→CHARGE→RELEASE→FOLLOW 和 CARRY→TRANSPORT→CARRY
+- 吸附中标记消失 1.5s：保持 CARRY、Qi 不断，按 `c` 后正常释放
 - 手眼 Park 解法：无噪声 0.0mm，0.5mm 噪声下 0.14mm
 - 状态机全流程与丢目标回退（mock）
 

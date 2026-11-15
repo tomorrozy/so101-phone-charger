@@ -110,6 +110,7 @@ class Follower:
         self.gap = self.hover
         self.mode = "portrait"
         self.release_reason = ""
+        self.last_target = None
         self.force_retract = False
         self.still_t = 0.0
         self.lost_t = 0.0
@@ -216,22 +217,28 @@ class Follower:
             self.setpoint = self.arm.fk()
 
         if not target.visible:
-            self.charger.disable()
-            self.lost_t += dt
-            if not self.lost_handled and self.lost_t > self.lost_timeout:
-                self.lost_handled = True
-                self.retract_target = self.setpoint.copy()
-                self.retract_target[:3, 3] += self.last_n * self.retract_len
-                self._enter(State.RETRACT)
-            if self.state is State.RETRACT:
-                self.setpoint = self._towards(self.setpoint, self.retract_target, dt)
-                if np.linalg.norm(self.setpoint[:3, 3] - self.retract_target[:3, 3]) < 1.0:
-                    self._enter(State.IDLE)
-            self.arm.move_to(self.setpoint)
-            return self.setpoint
+            if self.state in (State.CARRY, State.TRANSPORT) and self.last_target is not None:
+                # 吸到 1mm 时相机看不到标记是正常的：沿用最后位姿，跳过滑动检测
+                lt = self.last_target
+                target = Target(True, lt.pos_mm, lt.normal, 0.0, target.stamp, lt.top_dir, None)
+            else:
+                self.charger.disable()
+                self.lost_t += dt
+                if not self.lost_handled and self.lost_t > self.lost_timeout:
+                    self.lost_handled = True
+                    self.retract_target = self.setpoint.copy()
+                    self.retract_target[:3, 3] += self.last_n * self.retract_len
+                    self._enter(State.RETRACT)
+                if self.state is State.RETRACT:
+                    self.setpoint = self._towards(self.setpoint, self.retract_target, dt)
+                    if np.linalg.norm(self.setpoint[:3, 3] - self.retract_target[:3, 3]) < 1.0:
+                        self._enter(State.IDLE)
+                self.arm.move_to(self.setpoint)
+                return self.setpoint
 
         self.lost_t = 0.0
         self.lost_handled = False
+        self.last_target = target
         self.last_n = target.normal.copy()
 
         if self.state is State.RETRACT and self.force_retract:
