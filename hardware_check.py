@@ -131,7 +131,13 @@ def main():
         print(f"{name:<{width}} {status:<5} {msg}")
 
     fails = [r for r in rows if r[1] == "FAIL"]
-    print("\n结论:", "全部通过" if not fails else f"{len(fails)} 项失败，先处理 FAIL")
+    skips = [r for r in rows if r[1] == "SKIP"]
+    if fails:
+        print(f"\n结论: {len(fails)} 项失败，先处理 FAIL")
+    elif skips:
+        print(f"\n结论: 没有失败，但 {len(skips)} 项 SKIP（硬件/依赖未到位）")
+    else:
+        print("\n结论: 全部通过")
 
 
 if __name__ == "__main__":
